@@ -23,6 +23,7 @@ This tool is particularly useful for technical engineers, researchers, and devel
 1. Download the `timepoint_extractor.lua` script.
 2. Move the script to the VLC extensions directory:
    - **Windows**: `C:\Program Files\VideoLAN\VLC\lua\extensions`
+   - **Linux**: `~/.local/share/vlc/lua/extensions/`
 3. Restart VLC.
 4. Open the extension from the menu: `View` -> `VLC TimePoint Extractor`.
 
