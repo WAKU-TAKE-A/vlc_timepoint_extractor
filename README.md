@@ -43,7 +43,4 @@ This tool is particularly useful for technical engineers, researchers, and devel
   - Clips the video segment based on "Before" and "After" seconds.
   - Filename format: `PointXXXX_Remark.ext`.
 
-## Use Case: AI Dataset Preparation
-For engineers developing automated visual inspection systems (e.g., using YOLOX or OpenCV), this tool simplifies the process of labeling and extracting high-quality training samples directly from raw video footage.
-
 
