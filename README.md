@@ -1,4 +1,4 @@
-# VLC TimePoint Extractor (v0.9.4)
+# VLC TimePoint Extractor
 
 A VLC media player extension designed to manage video timepoints and automate frame sequence or clip extraction using FFmpeg.
 
