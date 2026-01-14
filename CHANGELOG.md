@@ -1,3 +1,7 @@
+## [0.9.5] - 2026-01-14
+### Added
+- **ボタン操作時の選択チェック機能**: `Jump To`、`Update Remark`、`Remove Point` の各ボタン押下時、リストが未選択であればステータス欄に「Select a point first.」と警告を表示するように改善。
+
 ## [0.9.4] - 2026-01-14
 ### Changed
 - **出力フォルダ名の統一**: 抽出データの保存先を `_frames` / `_cuts` から、より明示的な `_extracted_frames` / `_extracted_movies` へ変更。
