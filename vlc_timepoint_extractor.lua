@@ -52,7 +52,7 @@ function descriptor()
     return {
         title = APP_TITLE .. " " .. EXTENSION_VERSION,
         version = EXTENSION_VERSION,
-        author = "UsWAKU-TAKE-A",
+        author = "WAKU-TAKE-A",
         shortdesc = APP_TITLE,
         description = "Manage TimePoints and extract frames/clips. Unified 'extracted' folder naming.",
         capabilities = {"menu", "input-listener"}
@@ -412,3 +412,4 @@ end
 function input_changed() sync_with_input() end
 function menu() return {"Open TimePoint Extractor"} end
 function trigger_menu() show_gui() end
+
