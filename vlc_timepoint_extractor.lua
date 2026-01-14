@@ -2,13 +2,13 @@
 -- VLC TimePoint Extractor
 -- Concept: Manage video timepoints and extract frame sequences via FFmpeg.
 -- Storage: Data is saved as a .tp file in the same directory as the video.
--- Version: 0.9.4 (Unified Naming & Layout Optimized)
+-- Version: 0.9.5 (Added selection checks for all operations)
 --]]
 
 ------------------------------------------------------------------------
 -- Constants & Configuration
 ------------------------------------------------------------------------
-local EXTENSION_VERSION = "0.9.4"
+local EXTENSION_VERSION = "0.9.5"
 local APP_TITLE = "VLC TimePoint Extractor"
 local TIMEPOINT_EXT = ".tp"
 local TIME_BASE = 1000000 -- VLC internal time is in microseconds
@@ -24,7 +24,7 @@ local DEFAULT_FPS = 5
 local DEFAULT_BEFORE_SEC = 0
 local DEFAULT_AFTER_SEC = 0
 
--- Directory & File Naming Constants (Unified to 'extracted')
+-- Directory & File Naming Constants
 local DIR_SUFFIX_FRAMES = "_extracted_frames"
 local DIR_SUFFIX_CUTS = "_extracted_movies"
 local FALLBACK_VIDEO_NAME = "video"
@@ -52,9 +52,9 @@ function descriptor()
     return {
         title = APP_TITLE .. " " .. EXTENSION_VERSION,
         version = EXTENSION_VERSION,
-        author = "WAKU-TAKE-A",
+        author = "UsWAKU-TAKE-A",
         shortdesc = APP_TITLE,
-        description = "Manage TimePoints and extract frames/clips. Unified 'extracted' folder naming.",
+        description = "Manage TimePoints and extract frames/clips. Selection check added to all buttons.",
         capabilities = {"menu", "input-listener"}
     }
 end
@@ -113,7 +113,7 @@ function check_ffmpeg()
 end
 
 ------------------------------------------------------------------------
--- File I/O (Safety Enhanced)
+-- File I/O
 ------------------------------------------------------------------------
 function resolve_tp_path()
     local item = vlc.input.item()
@@ -200,7 +200,7 @@ function update_status(msg)
 end
 
 ------------------------------------------------------------------------
--- GUI Setup (Literal Magic Numbers for Visual Check)
+-- GUI Setup (Literal Magic Numbers)
 ------------------------------------------------------------------------
 function show_gui()
     if state.ui.dialog then
@@ -215,7 +215,7 @@ function show_gui()
     d:add_label("Remark:", 2, 1, 1, 1)
     state.ui.widgets.remark_input = d:add_text_input("", 3, 1, 1, 1)
 
-    -- Right Section: List (Starts row 2, Spans 16 rows to match Close button at row 17)
+    -- Right Section: List (Starts row 2, Spans 16 rows)
     state.ui.widgets.tp_list = d:add_list(2, 2, 2, 16)
 
     -- Left Section: Point Operations (Rows 2 - 4)
@@ -223,7 +223,7 @@ function show_gui()
     d:add_button("Jump To", handle_jump, 1, 3, 1, 1)
     d:add_button("Update Remark", handle_update, 1, 4, 1, 1)
 
-    -- Left Section: Extraction Settings (Sequential from Row 5)
+    -- Left Section: Extraction Settings (Rows 5 - 17)
     d:add_label("<b>Extraction Settings</b>", 1, 5, 1, 1)
     
     d:add_label("Before (sec):", 1, 6, 1, 1)
@@ -239,15 +239,14 @@ function show_gui()
     state.ui.widgets.ext_w = d:add_text_input(tostring(DEFAULT_WIDTH), 1, 13, 1, 1)
     state.ui.widgets.ext_h = d:add_text_input(tostring(DEFAULT_HEIGHT), 1, 14, 1, 1)
 
-    -- Action Buttons (Rows 15 - 17)
+    -- Action Buttons
     d:add_button("Extract Frames", handle_extract, 1, 15, 1, 1)
     d:add_button("Extract Movie", handle_extract_movie, 1, 16, 1, 1)
     d:add_button("Close", close, 1, 17, 1, 1)
 
-    -- Status Label (Row 18)
+    -- Status Label
     state.ui.widgets.status = d:add_label("", 2, 18, 2, 1)
 
-    -- FFmpeg Warning Check
     if not state.ffmpeg_available then
         update_status("<font color='red'>FFmpeg not found in PATH</font>")
     end
@@ -275,23 +274,29 @@ function handle_add()
         return 
     end
 
-    local micros = vlc.var.get(input_obj, "time")
+    local current_time_micros = vlc.var.get(input_obj, "time")
+    local remark_text = state.ui.widgets.remark_input:get_text()
+
     table.insert(state.timepoints, {
-        time = micros,
+        time = current_time_micros,
         label = "",
-        formatted = format_time(micros),
-        remark = state.ui.widgets.remark_input:get_text()
+        formatted = format_time(current_time_micros),
+        remark = remark_text
     })
 
     update_timepoints_order()
     save_timepoints()
     refresh_list()
-    update_status("Added: " .. format_time(micros))
+    update_status("TimePoint added.")
 end
 
 function handle_jump()
     local selection = state.ui.widgets.tp_list:get_selection()
-    if not selection then return end
+    if not selection then 
+        update_status("Select a point first.")
+        return 
+    end
+    
     local id = next(selection)
     if id then
         local input_obj = vlc.object.input()
@@ -304,10 +309,15 @@ end
 
 function handle_update()
     local selection = state.ui.widgets.tp_list:get_selection()
-    if not selection then return end
+    if not selection then 
+        update_status("Select a point first.")
+        return 
+    end
+    
     local id = next(selection)
+    local new_remark = state.ui.widgets.remark_input:get_text()
     if id then
-        state.timepoints[id].remark = state.ui.widgets.remark_input:get_text()
+        state.timepoints[id].remark = new_remark
         save_timepoints()
         refresh_list()
         update_status("Remark updated.")
@@ -316,19 +326,23 @@ end
 
 function handle_remove()
     local selection = state.ui.widgets.tp_list:get_selection()
-    if not selection then return end
+    if not selection then 
+        update_status("Select a point first.")
+        return 
+    end
+    
     local id = next(selection)
     if id then
         table.remove(state.timepoints, id)
         update_timepoints_order()
         save_timepoints()
         refresh_list()
-        update_status("Removed.")
+        update_status("TimePoint removed.")
     end
 end
 
 ------------------------------------------------------------------------
--- FFmpeg Extraction
+-- Extraction Logic
 ------------------------------------------------------------------------
 function get_export_context()
     local item = vlc.input.item()
@@ -412,4 +426,3 @@ end
 function input_changed() sync_with_input() end
 function menu() return {"Open TimePoint Extractor"} end
 function trigger_menu() show_gui() end
-
