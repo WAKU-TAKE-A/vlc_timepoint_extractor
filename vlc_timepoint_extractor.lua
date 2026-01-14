@@ -2,13 +2,13 @@
 -- VLC TimePoint Extractor
 -- Concept: Manage video timepoints and extract frame sequences via FFmpeg.
 -- Storage: Data is saved as a .tp file in the same directory as the video.
--- Version: 0.9.3 (Optimized Layout Flow)
+-- Version: 0.9.4 (Unified Naming & Layout Optimized)
 --]]
 
 ------------------------------------------------------------------------
 -- Constants & Configuration
 ------------------------------------------------------------------------
-local EXTENSION_VERSION = "0.9.3"
+local EXTENSION_VERSION = "0.9.4"
 local APP_TITLE = "VLC TimePoint Extractor"
 local TIMEPOINT_EXT = ".tp"
 local TIME_BASE = 1000000 -- VLC internal time is in microseconds
@@ -24,9 +24,9 @@ local DEFAULT_FPS = 5
 local DEFAULT_BEFORE_SEC = 0
 local DEFAULT_AFTER_SEC = 0
 
--- Directory & File Naming Constants
-local DIR_SUFFIX_FRAMES = "_frames"
-local DIR_SUFFIX_CUTS = "_cuts"
+-- Directory & File Naming Constants (Unified to 'extracted')
+local DIR_SUFFIX_FRAMES = "_extracted_frames"
+local DIR_SUFFIX_CUTS = "_extracted_movies"
 local FALLBACK_VIDEO_NAME = "video"
 local FALLBACK_EXTENSION = ".mp4"
 local MOVIE_FILENAME_SEPARATOR = "_"
@@ -54,7 +54,7 @@ function descriptor()
         version = EXTENSION_VERSION,
         author = "UsWAKU-TAKE-A",
         shortdesc = APP_TITLE,
-        description = "Manage TimePoints and extract frames/clips. Sequential layout from row 5.",
+        description = "Manage TimePoints and extract frames/clips. Unified 'extracted' folder naming.",
         capabilities = {"menu", "input-listener"}
     }
 end
@@ -113,7 +113,7 @@ function check_ffmpeg()
 end
 
 ------------------------------------------------------------------------
--- File I/O
+-- File I/O (Safety Enhanced)
 ------------------------------------------------------------------------
 function resolve_tp_path()
     local item = vlc.input.item()
@@ -200,7 +200,7 @@ function update_status(msg)
 end
 
 ------------------------------------------------------------------------
--- GUI Setup (Literal Magic Numbers)
+-- GUI Setup (Literal Magic Numbers for Visual Check)
 ------------------------------------------------------------------------
 function show_gui()
     if state.ui.dialog then
@@ -210,20 +210,20 @@ function show_gui()
     state.ui.dialog = vlc.dialog(APP_TITLE)
     local d = state.ui.dialog
 
-    -- Row 1: Add Point and Remark Input
+    -- Row 1: Operations Header
     d:add_button("Add TimePoint", handle_add, 1, 1, 1, 1)
     d:add_label("Remark:", 2, 1, 1, 1)
     state.ui.widgets.remark_input = d:add_text_input("", 3, 1, 1, 1)
 
-    -- Right Section: List (Starts row 2, Spans 16 rows to reach row 17)
+    -- Right Section: List (Starts row 2, Spans 16 rows to match Close button at row 17)
     state.ui.widgets.tp_list = d:add_list(2, 2, 2, 16)
 
-    -- Left Section: Point Controls (Rows 2 - 4)
+    -- Left Section: Point Operations (Rows 2 - 4)
     d:add_button("Remove Point", handle_remove, 1, 2, 1, 1)
     d:add_button("Jump To", handle_jump, 1, 3, 1, 1)
     d:add_button("Update Remark", handle_update, 1, 4, 1, 1)
 
-    -- Left Section: Extraction Settings (Rows 5 - 17)
+    -- Left Section: Extraction Settings (Sequential from Row 5)
     d:add_label("<b>Extraction Settings</b>", 1, 5, 1, 1)
     
     d:add_label("Before (sec):", 1, 6, 1, 1)
@@ -239,6 +239,7 @@ function show_gui()
     state.ui.widgets.ext_w = d:add_text_input(tostring(DEFAULT_WIDTH), 1, 13, 1, 1)
     state.ui.widgets.ext_h = d:add_text_input(tostring(DEFAULT_HEIGHT), 1, 14, 1, 1)
 
+    -- Action Buttons (Rows 15 - 17)
     d:add_button("Extract Frames", handle_extract, 1, 15, 1, 1)
     d:add_button("Extract Movie", handle_extract_movie, 1, 16, 1, 1)
     d:add_button("Close", close, 1, 17, 1, 1)
@@ -246,6 +247,7 @@ function show_gui()
     -- Status Label (Row 18)
     state.ui.widgets.status = d:add_label("", 2, 18, 2, 1)
 
+    -- FFmpeg Warning Check
     if not state.ffmpeg_available then
         update_status("<font color='red'>FFmpeg not found in PATH</font>")
     end
@@ -273,26 +275,23 @@ function handle_add()
         return 
     end
 
-    local current_time_micros = vlc.var.get(input_obj, "time")
-    local remark_text = state.ui.widgets.remark_input:get_text()
-
+    local micros = vlc.var.get(input_obj, "time")
     table.insert(state.timepoints, {
-        time = current_time_micros,
+        time = micros,
         label = "",
-        formatted = format_time(current_time_micros),
-        remark = remark_text
+        formatted = format_time(micros),
+        remark = state.ui.widgets.remark_input:get_text()
     })
 
     update_timepoints_order()
     save_timepoints()
     refresh_list()
-    update_status("TimePoint added.")
+    update_status("Added: " .. format_time(micros))
 end
 
 function handle_jump()
     local selection = state.ui.widgets.tp_list:get_selection()
     if not selection then return end
-    
     local id = next(selection)
     if id then
         local input_obj = vlc.object.input()
@@ -306,11 +305,9 @@ end
 function handle_update()
     local selection = state.ui.widgets.tp_list:get_selection()
     if not selection then return end
-    
     local id = next(selection)
-    local new_remark = state.ui.widgets.remark_input:get_text()
     if id then
-        state.timepoints[id].remark = new_remark
+        state.timepoints[id].remark = state.ui.widgets.remark_input:get_text()
         save_timepoints()
         refresh_list()
         update_status("Remark updated.")
@@ -320,31 +317,27 @@ end
 function handle_remove()
     local selection = state.ui.widgets.tp_list:get_selection()
     if not selection then return end
-    
     local id = next(selection)
     if id then
         table.remove(state.timepoints, id)
         update_timepoints_order()
         save_timepoints()
         refresh_list()
-        update_status("TimePoint removed.")
+        update_status("Removed.")
     end
 end
 
 ------------------------------------------------------------------------
--- Extraction Logic
+-- FFmpeg Extraction
 ------------------------------------------------------------------------
 function get_export_context()
     local item = vlc.input.item()
     if not item then return nil end
-    
     local video_path = vlc.strings.make_path(item:uri())
     if not video_path then return nil end
-    
     local dir = video_path:match("^(.*[\\/])")
     local name = video_path:match("([^\\/]+)%.%w+$") or FALLBACK_VIDEO_NAME
     local ext = video_path:match("(%.%w+)$") or FALLBACK_EXTENSION
-    
     return video_path, dir, name, ext
 end
 
@@ -358,21 +351,21 @@ function handle_extract()
     if not v_path then return end
     
     local slash = package.config:sub(1,1)
-    local frame_dir = v_dir .. v_name .. DIR_SUFFIX_FRAMES
-    local sub_dir = frame_dir .. slash .. sanitize_filename(tp.label)
+    local root_dir = v_dir .. v_name .. DIR_SUFFIX_FRAMES
+    local sub_dir = root_dir .. slash .. sanitize_filename(tp.label)
 
-    vlc.io.mkdir(frame_dir, "0700")
+    vlc.io.mkdir(root_dir, "0700")
     vlc.io.mkdir(sub_dir, "0700")
 
-    local before_sec = tonumber(state.ui.widgets.ext_before:get_text()) or 0
-    local after_sec = tonumber(state.ui.widgets.ext_after:get_text()) or 0
-    local start_sec = math.max(0, (tp.time / TIME_BASE) - before_sec)
-    local duration_sec = before_sec + after_sec
+    local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
+    local aft = tonumber(state.ui.widgets.ext_after:get_text()) or 0
+    local start_sec = math.max(0, (tp.time / TIME_BASE) - bef)
+    local dur = bef + aft
 
     local cmd
-    if duration_sec > 0 then
+    if dur > 0 then
         cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" "%s/frame_%%04d.png"',
-            start_sec, duration_sec, v_path, 
+            start_sec, dur, v_path, 
             tonumber(state.ui.widgets.ext_fps:get_text()) or 1,
             tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
             tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub_dir)
@@ -382,7 +375,6 @@ function handle_extract()
             tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
             tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub_dir)
     end
-
     update_status("Extracting frames...")
     os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
 end
@@ -397,18 +389,18 @@ function handle_extract_movie()
     if not v_path then return end
 
     local slash = package.config:sub(1,1)
-    local movie_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
-    vlc.io.mkdir(movie_dir, "0700")
+    local export_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
+    vlc.io.mkdir(export_dir, "0700")
 
-    local before_sec = tonumber(state.ui.widgets.ext_before:get_text()) or 0
-    local after_sec = tonumber(state.ui.widgets.ext_after:get_text()) or 0
+    local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
+    local aft = tonumber(state.ui.widgets.ext_after:get_text()) or 0
     
-    local remark_sanitized = sanitize_filename(tp.remark)
-    local out_filename = tp.label .. (remark_sanitized ~= "" and (MOVIE_FILENAME_SEPARATOR .. remark_sanitized) or "") .. v_ext
-    local out_path = movie_dir .. slash .. out_filename
+    local remark_part = sanitize_filename(tp.remark)
+    local out_filename = tp.label .. (remark_part ~= "" and (MOVIE_FILENAME_SEPARATOR .. remark_part) or "") .. v_ext
+    local out_path = export_dir .. slash .. out_filename
 
     local cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -c copy "%s"',
-        math.max(0, (tp.time / TIME_BASE) - before_sec), before_sec + after_sec, v_path, out_path)
+        math.max(0, (tp.time / TIME_BASE) - bef), bef + aft, v_path, out_path)
 
     update_status("Extracting movie...")
     os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
@@ -417,14 +409,6 @@ end
 ------------------------------------------------------------------------
 -- VLC Events
 ------------------------------------------------------------------------
-function input_changed()
-    sync_with_input()
-end
-
-function menu()
-    return {"Open TimePoint Extractor"}
-end
-
-function trigger_menu()
-    show_gui()
-end
+function input_changed() sync_with_input() end
+function menu() return {"Open TimePoint Extractor"} end
+function trigger_menu() show_gui() end
