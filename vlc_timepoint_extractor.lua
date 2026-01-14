@@ -2,13 +2,13 @@
 -- VLC TimePoint Extractor
 -- Concept: Manage video timepoints and extract frame sequences via FFmpeg.
 -- Storage: Data is saved as a .tp file in the same directory as the video.
--- Version: 0.9.1 (Manual Layout Optimized)
+-- Version: 0.9.3 (Optimized Layout Flow)
 --]]
 
 ------------------------------------------------------------------------
 -- Constants & Configuration
 ------------------------------------------------------------------------
-local EXTENSION_VERSION = "0.9.1"
+local EXTENSION_VERSION = "0.9.3"
 local APP_TITLE = "VLC TimePoint Extractor"
 local TIMEPOINT_EXT = ".tp"
 local TIME_BASE = 1000000 -- VLC internal time is in microseconds
@@ -54,7 +54,7 @@ function descriptor()
         version = EXTENSION_VERSION,
         author = "UsWAKU-TAKE-A",
         shortdesc = APP_TITLE,
-        description = "Manage TimePoints and extract frames/clips via FFmpeg. GUI uses literal layout for visual check.",
+        description = "Manage TimePoints and extract frames/clips. Sequential layout from row 5.",
         capabilities = {"menu", "input-listener"}
     }
 end
@@ -200,7 +200,7 @@ function update_status(msg)
 end
 
 ------------------------------------------------------------------------
--- GUI Setup (Hard-coded Layout for Visual Check)
+-- GUI Setup (Literal Magic Numbers)
 ------------------------------------------------------------------------
 function show_gui()
     if state.ui.dialog then
@@ -210,45 +210,42 @@ function show_gui()
     state.ui.dialog = vlc.dialog(APP_TITLE)
     local d = state.ui.dialog
 
-    -- Row 1: Operations
+    -- Row 1: Add Point and Remark Input
     d:add_button("Add TimePoint", handle_add, 1, 1, 1, 1)
     d:add_label("Remark:", 2, 1, 1, 1)
     state.ui.widgets.remark_input = d:add_text_input("", 3, 1, 1, 1)
 
-    -- Row 2 - 21: List and Sidebar Buttons (List span 20 rows)
-    state.ui.widgets.tp_list = d:add_list(2, 2, 2, 20)
+    -- Right Section: List (Starts row 2, Spans 16 rows to reach row 17)
+    state.ui.widgets.tp_list = d:add_list(2, 2, 2, 16)
+
+    -- Left Section: Point Controls (Rows 2 - 4)
     d:add_button("Remove Point", handle_remove, 1, 2, 1, 1)
     d:add_button("Jump To", handle_jump, 1, 3, 1, 1)
     d:add_button("Update Remark", handle_update, 1, 4, 1, 1)
 
-    -- Row 22: Header
-    d:add_label("<b>Extraction Settings</b>", 1, 22, 1, 1)
+    -- Left Section: Extraction Settings (Rows 5 - 17)
+    d:add_label("<b>Extraction Settings</b>", 1, 5, 1, 1)
     
-    -- Row 23 - 24: Before Settings
-    d:add_label("Before (sec):", 1, 23, 1, 1)
-    state.ui.widgets.ext_before = d:add_text_input(tostring(DEFAULT_BEFORE_SEC), 1, 24, 1, 1)
+    d:add_label("Before (sec):", 1, 6, 1, 1)
+    state.ui.widgets.ext_before = d:add_text_input(tostring(DEFAULT_BEFORE_SEC), 1, 7, 1, 1)
     
-    -- Row 25 - 26: After Settings
-    d:add_label("After (sec):", 1, 25, 1, 1)
-    state.ui.widgets.ext_after = d:add_text_input(tostring(DEFAULT_AFTER_SEC), 1, 26, 1, 1)
+    d:add_label("After (sec):", 1, 8, 1, 1)
+    state.ui.widgets.ext_after = d:add_text_input(tostring(DEFAULT_AFTER_SEC), 1, 9, 1, 1)
 
-    -- Row 27 - 28: FPS Settings
-    d:add_label("FPS:", 1, 27, 1, 1)
-    state.ui.widgets.ext_fps = d:add_text_input(tostring(DEFAULT_FPS), 1, 28, 1, 1)
+    d:add_label("FPS:", 1, 10, 1, 1)
+    state.ui.widgets.ext_fps = d:add_text_input(tostring(DEFAULT_FPS), 1, 11, 1, 1)
 
-    -- Row 29 - 31: Resolution Settings
-    d:add_label("Resolution (WxH):", 1, 29, 1, 1)
-    state.ui.widgets.ext_w = d:add_text_input(tostring(DEFAULT_WIDTH), 1, 30, 1, 1)
-    state.ui.widgets.ext_h = d:add_text_input(tostring(DEFAULT_HEIGHT), 1, 31, 1, 1)
+    d:add_label("Resolution (WxH):", 1, 12, 1, 1)
+    state.ui.widgets.ext_w = d:add_text_input(tostring(DEFAULT_WIDTH), 1, 13, 1, 1)
+    state.ui.widgets.ext_h = d:add_text_input(tostring(DEFAULT_HEIGHT), 1, 14, 1, 1)
 
-    -- Row 32 - 34: Action Buttons and Status
-    d:add_button("Extract Frames", handle_extract, 1, 32, 1, 1)
-    d:add_button("Extract Movie", handle_extract_movie, 1, 33, 1, 1)
-    d:add_button("Close", close, 1, 34, 1, 1)
+    d:add_button("Extract Frames", handle_extract, 1, 15, 1, 1)
+    d:add_button("Extract Movie", handle_extract_movie, 1, 16, 1, 1)
+    d:add_button("Close", close, 1, 17, 1, 1)
 
-    state.ui.widgets.status = d:add_label("", 2, 34, 2, 1)
+    -- Status Label (Row 18)
+    state.ui.widgets.status = d:add_label("", 2, 18, 2, 1)
 
-    -- Special Warning if FFmpeg is missing
     if not state.ffmpeg_available then
         update_status("<font color='red'>FFmpeg not found in PATH</font>")
     end
@@ -302,7 +299,6 @@ function handle_jump()
         if input_obj then
             vlc.var.set(input_obj, "time", state.timepoints[id].time)
         end
-        -- 反映（UX改善）
         state.ui.widgets.remark_input:set_text(state.timepoints[id].remark or "")
     end
 end
