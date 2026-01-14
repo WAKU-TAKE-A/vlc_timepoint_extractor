@@ -59,7 +59,7 @@ function descriptor()
     return {
         title = APP_TITLE .. " " .. EXTENSION_VERSION,
         version = EXTENSION_VERSION,
-        author = "UsWAKU-TAKE-A",
+        author = "WAKU-TAKE-A",
         shortdesc = APP_TITLE,
         description = "Manage TimePoints and extract frames/clips via FFmpeg with safety enhancements.",
         capabilities = {"menu", "input-listener"}
@@ -445,3 +445,4 @@ end
 function trigger_menu()
     show_gui()
 end
+
