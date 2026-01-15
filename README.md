@@ -1,4 +1,4 @@
-# VLC TimePoint Extractor
+# VLC TimePoint Extractor (v0.9.7)
 
 A VLC media player extension designed to manage video timepoints and automate frame sequence or clip extraction using FFmpeg.
 
@@ -10,6 +10,7 @@ This tool is particularly useful for technical engineers, researchers, and devel
 - **Metadata Storage**: Automatically saves/loads data to a `.tp` file (Lua table format) in the same directory as the video file.
 - **Frame Extraction**: Export frame sequences with configurable FPS, resolution (width/height), and "before/after" temporal buffers.
 - **Lossless Movie Cutting**: Instantly extract video segments using FFmpeg's stream copy (`-c copy`) without re-encoding.
+- **Re-encode Export**: Encode video segments to apply specific resolution and FPS settings.
 - **Remark Support**: Add custom notes/remarks to each timepoint for better data organization.
 - **Safety & Stability**: Includes FFmpeg path verification and protected data loading (`pcall`) to prevent crashes.
 - **Auto-Sorting**: Timepoints are always maintained in chronological order.
@@ -41,7 +42,15 @@ This tool is particularly useful for technical engineers, researchers, and devel
   - Creates a folder named `{video_name}_extracted_frames`.
   - Sub-folders are created for each point (e.g., `Point0001`).
   - Exports images as `.png` based on your FPS and resolution settings.
-- **Extract Movie**: 
+- **Extract Movie (Lossless)**: 
   - Creates a folder named `{video_name}_extracted_movies`.
   - Clips the video segment based on "Before" and "After" seconds using lossless stream copying.
   - Filename format: `PointXXXX_Remark.ext`.
+- **Extract Movie (Encode)**:
+  - Creates a folder named `{video_name}_extracted_movies`.
+  - Re-encodes the segment to apply your resolution and FPS settings.
+  - Filename format: `PointXXXX_Remark_encoded.ext`.
+
+## License
+MIT License
+
