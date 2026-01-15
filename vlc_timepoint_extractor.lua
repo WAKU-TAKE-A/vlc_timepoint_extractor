@@ -2,13 +2,13 @@
 -- VLC TimePoint Extractor
 -- Concept: Manage video timepoints and extract frame sequences via FFmpeg.
 -- Storage: Data is saved as a .tp file in the same directory as the video.
--- Version: 0.9.6 (Fixed selection check logic and author name)
+-- Version: 0.9.7 (Merged Updates & Lossless Label)
 --]]
 
 ------------------------------------------------------------------------
 -- Constants & Configuration
 ------------------------------------------------------------------------
-local EXTENSION_VERSION = "0.9.6"
+local EXTENSION_VERSION = "0.9.7"
 local APP_TITLE = "VLC TimePoint Extractor"
 local TIMEPOINT_EXT = ".tp"
 local TIME_BASE = 1000000 
@@ -54,7 +54,7 @@ function descriptor()
         version = EXTENSION_VERSION,
         author = "WAKU-TAKE-A",
         shortdesc = APP_TITLE,
-        description = "Manage TimePoints and extract frames/clips. Robust selection check version.",
+        description = "Manage TimePoints and extract frames/clips. Includes Lossless and Encode options.",
         capabilities = {"menu", "input-listener"}
     }
 end
@@ -175,23 +175,27 @@ function update_status(msg)
 end
 
 ------------------------------------------------------------------------
--- GUI Setup
+-- GUI Setup (Literal Magic Numbers)
 ------------------------------------------------------------------------
 function show_gui()
     if state.ui.dialog then state.ui.dialog:delete() end
     state.ui.dialog = vlc.dialog(APP_TITLE)
     local d = state.ui.dialog
 
+    -- Row 1: Operations Header
     d:add_button("Add TimePoint", handle_add, 1, 1, 1, 1)
     d:add_label("Remark:", 2, 1, 1, 1)
     state.ui.widgets.remark_input = d:add_text_input("", 3, 1, 1, 1)
 
-    state.ui.widgets.tp_list = d:add_list(2, 2, 2, 16)
+    -- Right Section: List (Rows 2 to 18)
+    state.ui.widgets.tp_list = d:add_list(2, 2, 2, 17)
 
+    -- Left Section: Point Operations (Rows 2 - 4)
     d:add_button("Remove Point", handle_remove, 1, 2, 1, 1)
     d:add_button("Jump To", handle_jump, 1, 3, 1, 1)
     d:add_button("Update Remark", handle_update, 1, 4, 1, 1)
 
+    -- Left Section: Extraction Settings (Sequential from Row 5)
     d:add_label("<b>Extraction Settings</b>", 1, 5, 1, 1)
     d:add_label("Before (sec):", 1, 6, 1, 1)
     state.ui.widgets.ext_before = d:add_text_input(tostring(DEFAULT_BEFORE_SEC), 1, 7, 1, 1)
@@ -203,11 +207,14 @@ function show_gui()
     state.ui.widgets.ext_w = d:add_text_input(tostring(DEFAULT_WIDTH), 1, 13, 1, 1)
     state.ui.widgets.ext_h = d:add_text_input(tostring(DEFAULT_HEIGHT), 1, 14, 1, 1)
 
+    -- Action Buttons (Rows 15 - 18)
     d:add_button("Extract Frames", handle_extract, 1, 15, 1, 1)
-    d:add_button("Extract Movie", handle_extract_movie, 1, 16, 1, 1)
-    d:add_button("Close", close, 1, 17, 1, 1)
+    d:add_button("Extract Movie (Lossless)", handle_extract_movie, 1, 16, 1, 1)
+    d:add_button("Extract Movie (Encode)", handle_extract_movie_encode, 1, 17, 1, 1)
+    d:add_button("Close", close, 1, 18, 1, 1)
 
-    state.ui.widgets.status = d:add_label("", 2, 18, 2, 1)
+    -- Status Label
+    state.ui.widgets.status = d:add_label("", 2, 19, 2, 1)
 
     if not state.ffmpeg_available then
         update_status("<font color='red'>FFmpeg not found in PATH</font>")
@@ -239,7 +246,6 @@ function handle_add()
     update_timepoints_order()
     save_timepoints()
     refresh_list()
-    update_status("TimePoint added.")
 end
 
 function handle_jump()
@@ -288,7 +294,7 @@ function handle_remove()
 end
 
 ------------------------------------------------------------------------
--- Extraction
+-- FFmpeg Logic
 ------------------------------------------------------------------------
 function get_export_context()
     local item = vlc.input.item()
@@ -302,29 +308,29 @@ function handle_extract()
     if not check_ffmpeg() then update_status("FFmpeg not found.") return end
     local selection = state.ui.widgets.tp_list:get_selection()
     if not selection or next(selection) == nil then 
-        update_status("Select a point first.")
-        return 
-    end
+        update_status("Select a point.") return end
+    
     local tp = state.timepoints[next(selection)]
     local v_path, v_dir, v_name = get_export_context()
     local slash = package.config:sub(1,1)
-    local frame_dir = v_dir .. v_name .. DIR_SUFFIX_FRAMES
-    local sub_dir = frame_dir .. slash .. sanitize_filename(tp.label)
-    vlc.io.mkdir(frame_dir, "0700")
-    vlc.io.mkdir(sub_dir, "0700")
+    local root = v_dir .. v_name .. DIR_SUFFIX_FRAMES
+    local sub = root .. slash .. sanitize_filename(tp.label)
+    vlc.io.mkdir(root, "0700"); vlc.io.mkdir(sub, "0700")
+
     local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
     local dur = bef + (tonumber(state.ui.widgets.ext_after:get_text()) or 0)
     local start = math.max(0, (tp.time / TIME_BASE) - bef)
+    
     local cmd
     if dur > 0 then
         cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" "%s/frame_%%04d.png"',
             start, dur, v_path, tonumber(state.ui.widgets.ext_fps:get_text()) or 1,
             tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
-            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub_dir)
+            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub)
     else
         cmd = string.format('ffmpeg -y -ss %.3f -i "%s" -frames:v 1 -vf "scale=%d:%d" "%s/frame_0001.png"',
             start, v_path, tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
-            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub_dir)
+            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub)
     end
     update_status("Extracting frames...")
     os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
@@ -334,20 +340,50 @@ function handle_extract_movie()
     if not check_ffmpeg() then update_status("FFmpeg not found.") return end
     local selection = state.ui.widgets.tp_list:get_selection()
     if not selection or next(selection) == nil then 
-        update_status("Select a point first.")
-        return 
-    end
+        update_status("Select a point first.") return end
+    
     local tp = state.timepoints[next(selection)]
     local v_path, v_dir, v_name, v_ext = get_export_context()
     local slash = package.config:sub(1,1)
     local export_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
     vlc.io.mkdir(export_dir, "0700")
+    
     local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
     local dur = bef + (tonumber(state.ui.widgets.ext_after:get_text()) or 0)
     local out_name = tp.label .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "") .. v_ext
+    
+    -- 無劣化コピー
     local cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -c copy "%s/%s"',
         math.max(0, (tp.time / TIME_BASE) - bef), dur, v_path, export_dir, out_name)
-    update_status("Extracting movie...")
+    update_status("Extracting movie (Lossless)...")
+    os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
+end
+
+function handle_extract_movie_encode()
+    if not check_ffmpeg() then update_status("FFmpeg not found.") return end
+    local selection = state.ui.widgets.tp_list:get_selection()
+    if not selection or next(selection) == nil then 
+        update_status("Select a point first.") return end
+    
+    local tp = state.timepoints[next(selection)]
+    local v_path, v_dir, v_name, v_ext = get_export_context()
+    local slash = package.config:sub(1,1)
+    local export_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
+    vlc.io.mkdir(export_dir, "0700")
+    
+    local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
+    local dur = bef + (tonumber(state.ui.widgets.ext_after:get_text()) or 0)
+    local fps = tonumber(state.ui.widgets.ext_fps:get_text()) or 30
+    local w   = tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH
+    local h   = tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT
+    
+    local out_name = tp.label .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "") .. "_encoded" .. v_ext
+    
+    -- 再エンコード
+    local cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" -c:v libx264 -preset ultrafast -crf 23 -c:a aac "%s/%s"',
+        math.max(0, (tp.time / TIME_BASE) - bef), dur, v_path, fps, w, h, export_dir, out_name)
+    
+    update_status("Extracting movie (Encoding)...")
     os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
 end
 
