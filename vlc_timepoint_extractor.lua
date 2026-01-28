@@ -2,13 +2,14 @@
 -- VLC TimePoint Extractor
 -- Concept: Manage video timepoints and extract frame sequences via FFmpeg.
 -- Storage: Data is saved as a .tp file in the same directory as the video.
--- Version: 0.9.7 (Merged Updates & Lossless Label)
+--   Windows: if preferred path has non-ASCII bytes -> force fallback to userdatadir (avoid mojibake)
+-- Version: 0.9.8
 --]]
 
 ------------------------------------------------------------------------
 -- Constants & Configuration
 ------------------------------------------------------------------------
-local EXTENSION_VERSION = "0.9.7"
+local EXTENSION_VERSION = "0.9.8"
 local APP_TITLE = "VLC TimePoint Extractor"
 local TIMEPOINT_EXT = ".tp"
 local TIME_BASE = 1000000 
@@ -31,6 +32,13 @@ local FALLBACK_VIDEO_NAME = "video"
 local FALLBACK_EXTENSION = ".mp4"
 local MOVIE_FILENAME_SEPARATOR = "_"
 
+local TP_FALLBACK_SUBDIR = "timepoint_extractor"
+local TP_FALLBACK_KEY_MAXLEN = 120
+
+local FFLOG_NAME = "ffmpeg_last.log"
+local FFCMDTXT_NAME = "ffmpeg_last_command.txt"
+local FFRUN_NAME = "ffmpeg_run.cmd"
+
 ------------------------------------------------------------------------
 -- Global State
 ------------------------------------------------------------------------
@@ -44,6 +52,36 @@ local state = {
         widgets = {}
     }
 }
+
+------------------------------------------------------------------------
+-- Small helpers
+------------------------------------------------------------------------
+local function get_slash() return package.config:sub(1,1) end
+local function is_windows() return get_slash() == "\\" end
+local function has_non_ascii_bytes(s) return (type(s) == "string") and (s:find("[\128-\255]") ~= nil) end
+
+local function trim_trailing_slash(p)
+    if not p or p == "" then return p end
+    if p:sub(-1) == "/" or p:sub(-1) == "\\" then return p:sub(1, -2) end
+    return p
+end
+
+local function path_join(dir, leaf)
+    local slash = get_slash()
+    dir  = tostring(dir or ""):gsub("[/\\]+$", "")
+    leaf = tostring(leaf or ""):gsub("^[/\\]+", "")
+    return dir .. slash .. leaf
+end
+
+local function write_text_file(path, text, with_utf8_bom)
+    if not path then return false end
+    local f = io.open(path, "wb")
+    if not f then return false end
+    if with_utf8_bom then f:write("\239\187\191") end -- UTF-8 BOM
+    f:write(text or "")
+    f:close()
+    return true
+end
 
 ------------------------------------------------------------------------
 -- VLC Extension Descriptor
@@ -96,54 +134,11 @@ function sync_with_input()
 end
 
 function check_ffmpeg()
-    local slash = package.config:sub(1,1)
-    local dev_null = (slash == "\\") and "NUL" or "/dev/null"
+    local dev_null = is_windows() and "NUL" or "/dev/null"
     local cmd = string.format("ffmpeg -version > %s 2>&1", dev_null)
     local success = os.execute(cmd)
-    state.ffmpeg_available = (success == 0)
+    state.ffmpeg_available = (success == 0 or success == true)
     return state.ffmpeg_available
-end
-
-------------------------------------------------------------------------
--- File I/O
-------------------------------------------------------------------------
-function resolve_tp_path()
-    local item = vlc.input.item()
-    if not item then return nil end
-    local path = vlc.strings.make_path(item:uri())
-    if not path then return nil end
-    return (path:match("(.+)%..+$") or path) .. TIMEPOINT_EXT
-end
-
-function save_timepoints()
-    state.tp_file_path = resolve_tp_path()
-    if not state.tp_file_path then return end
-    local file, err = io.open(state.tp_file_path, "wb")
-    if err then return end
-    file:write("return {\n")
-    for _, tp in ipairs(state.timepoints) do
-        file:write(string.format("  { time = %d, label = %q, formatted = %q, remark = %q },\n", 
-            tp.time, tp.label, tp.formatted, tp.remark or ""))
-    end
-    file:write("}\n")
-    file:close()
-end
-
-function load_timepoints()
-    state.tp_file_path = resolve_tp_path()
-    if not state.tp_file_path then 
-        state.timepoints = {}
-        return 
-    end
-    local chunk, load_err = loadfile(state.tp_file_path)
-    if not load_err and chunk then
-        local ok, result = pcall(chunk)
-        if ok and type(result) == "table" then
-            state.timepoints = result
-            return
-        end
-    end
-    state.timepoints = {}
 end
 
 ------------------------------------------------------------------------
@@ -163,6 +158,14 @@ function sanitize_filename(name)
     return s:gsub("_+", "_"):gsub("^_", ""):gsub("_$", "")
 end
 
+local function djb2_hash(str)
+    local h = 5381
+    for i = 1, #str do
+        h = ((h * 33) + str:byte(i)) % 4294967296
+    end
+    return string.format("%08x", h)
+end
+
 function update_timepoints_order()
     table.sort(state.timepoints, function(a, b) return a.time < b.time end)
     for i, tp in ipairs(state.timepoints) do
@@ -175,7 +178,219 @@ function update_status(msg)
 end
 
 ------------------------------------------------------------------------
--- GUI Setup (Literal Magic Numbers)
+-- userdatadir helpers (tp + ffmpeg logs)
+------------------------------------------------------------------------
+local function get_tp_fallback_dir()
+    if not vlc.config or not vlc.config.userdatadir then return nil end
+    local base = trim_trailing_slash(vlc.config.userdatadir())
+    if not base or base == "" then return nil end
+    local dir = base .. get_slash() .. TP_FALLBACK_SUBDIR
+    if vlc.io and vlc.io.mkdir then vlc.io.mkdir(dir, "0700") end
+    return dir
+end
+
+local function get_ffmpeg_log_path()
+    local dir = get_tp_fallback_dir()
+    if not dir then return nil end
+    return path_join(dir, FFLOG_NAME)
+end
+
+local function get_ffmpeg_cmdtxt_path()
+    local dir = get_tp_fallback_dir()
+    if not dir then return nil end
+    return path_join(dir, FFCMDTXT_NAME)
+end
+
+local function get_ffmpeg_run_cmd_path()
+    local dir = get_tp_fallback_dir()
+    if not dir then return nil end
+    return path_join(dir, FFRUN_NAME)
+end
+
+------------------------------------------------------------------------
+-- Media context / local path
+------------------------------------------------------------------------
+local function get_media_item()
+    return vlc.input.item()
+end
+
+local function get_input_path_for_ffmpeg()
+    -- IMPORTANT: use local path (not file:/// URI)
+    local item = get_media_item()
+    if not item then return nil end
+    local p = vlc.strings.make_path(item:uri())
+    if p and p ~= "" then return p end
+    return nil
+end
+
+------------------------------------------------------------------------
+-- Windows ffmpeg runner (.cmd wrapper)
+------------------------------------------------------------------------
+local function save_last_ffmpeg_command(cmd_plain)
+    write_text_file(get_ffmpeg_cmdtxt_path(), (cmd_plain or "") .. "\r\n", false)
+end
+
+local function run_ffmpeg_async(cmd_plain)
+    save_last_ffmpeg_command(cmd_plain)
+
+    local log_path = get_ffmpeg_log_path()
+    local run_cmd_path = get_ffmpeg_run_cmd_path()
+
+    if is_windows() then
+        local log_redir = ""
+        if log_path then
+            log_redir = string.format(' > "%s" 2>&1', log_path)
+        end
+
+        -- IMPORTANT:
+        -- In .cmd, %0..%9 are replaced by batch args. So frame_%04d.png breaks.
+        -- Escape % as %% only for the cmd file content.
+        local cmd_for_cmdfile = (cmd_plain or ""):gsub("%%", "%%%%")
+
+        local script = table.concat({
+            "@echo off",
+            "setlocal",
+            "chcp 65001 >nul",
+            cmd_for_cmdfile .. log_redir,
+            "endlocal",
+            ""
+        }, "\r\n")
+
+        -- UTF-8 BOM付きで書く（日本語パスを.cmd内にそのまま書ける可能性を上げる）
+        write_text_file(run_cmd_path, script, true)
+
+        -- 実行（バックグラウンド）
+        os.execute(string.format('start "" /b cmd /v:off /c "%s"', run_cmd_path))
+    else
+        local final = cmd_plain
+        if log_path then
+            final = final .. string.format(' > "%s" 2>&1', log_path)
+        end
+        os.execute(final .. " &")
+    end
+end
+
+------------------------------------------------------------------------
+-- TP Path Resolve (preferred + fallback)
+------------------------------------------------------------------------
+local function resolve_tp_paths()
+    local item = get_media_item()
+    if not item then return nil, nil end
+
+    local preferred = nil
+    local path = vlc.strings.make_path(item:uri())
+    if path then
+        preferred = (path:match("(.+)%..+$") or path) .. TIMEPOINT_EXT
+    end
+
+    local fallback = nil
+    local fdir = get_tp_fallback_dir()
+    if fdir then
+        local uri = item:uri() or ""
+        local key = sanitize_filename(uri)
+        if #key > TP_FALLBACK_KEY_MAXLEN then
+            key = key:sub(1, TP_FALLBACK_KEY_MAXLEN) .. "_" .. djb2_hash(uri)
+        end
+        fallback = fdir .. get_slash() .. key .. TIMEPOINT_EXT
+    end
+
+    return preferred, fallback
+end
+
+local function force_fallback_for_preferred(preferred_path)
+    return is_windows() and has_non_ascii_bytes(preferred_path)
+end
+
+------------------------------------------------------------------------
+-- File I/O (.tp)
+------------------------------------------------------------------------
+local function write_timepoints_to_file(fh)
+    fh:write("return {\n")
+    for _, tp in ipairs(state.timepoints) do
+        fh:write(string.format(
+            "  { time = %d, label = %q, formatted = %q, remark = %q },\n",
+            tp.time, tp.label, tp.formatted, tp.remark or ""
+        ))
+    end
+    fh:write("}\n")
+end
+
+local function try_save_to(path)
+    if not path then return false end
+    local fh = io.open(path, "wb")
+    if not fh then return false end
+    write_timepoints_to_file(fh)
+    fh:close()
+    state.tp_file_path = path
+    return true
+end
+
+function save_timepoints()
+    local preferred, fallback = resolve_tp_paths()
+
+    if force_fallback_for_preferred(preferred) then
+        if try_save_to(fallback) then
+            update_status("TP saved in userdatadir (forced fallback).")
+        else
+            update_status("Failed to save TP file (fallback).")
+        end
+        return
+    end
+
+    if try_save_to(preferred) then return end
+    if try_save_to(fallback) then
+        update_status("TP saved in userdatadir (fallback).")
+        return
+    end
+    update_status("Failed to save TP file.")
+end
+
+local function try_load_timepoints(path)
+    if not path then return nil end
+    local chunk = loadfile(path)
+    if not chunk then return nil end
+    local ok, result = pcall(chunk)
+    if ok and type(result) == "table" then return result end
+    return nil
+end
+
+function load_timepoints()
+    local preferred, fallback = resolve_tp_paths()
+
+    if force_fallback_for_preferred(preferred) then
+        local t = try_load_timepoints(fallback)
+        if t then
+            state.tp_file_path = fallback
+            state.timepoints = t
+            update_status("TP loaded from userdatadir (forced fallback).")
+            return
+        end
+        state.tp_file_path = fallback
+        state.timepoints = {}
+        return
+    end
+
+    local t = try_load_timepoints(preferred)
+    if t then
+        state.tp_file_path = preferred
+        state.timepoints = t
+        return
+    end
+
+    t = try_load_timepoints(fallback)
+    if t then
+        state.tp_file_path = fallback
+        state.timepoints = t
+        update_status("TP loaded from userdatadir (fallback).")
+        return
+    end
+
+    state.tp_file_path = preferred or fallback
+    state.timepoints = {}
+end
+
+------------------------------------------------------------------------
+-- GUI Setup
 ------------------------------------------------------------------------
 function show_gui()
     if state.ui.dialog then state.ui.dialog:delete() end
@@ -297,11 +512,14 @@ end
 -- FFmpeg Logic
 ------------------------------------------------------------------------
 function get_export_context()
-    local item = vlc.input.item()
+    local item = get_media_item()
     if not item then return nil end
     local path = vlc.strings.make_path(item:uri())
     if not path then return nil end
-    return path, path:match("^(.*[\\/])"), path:match("([^\\/]+)%.%w+$") or FALLBACK_VIDEO_NAME, path:match("(%.%w+)$") or FALLBACK_EXTENSION
+    return path,
+        path:match("^(.*[\\/])"),
+        path:match("([^\\/]+)%.%w+$") or FALLBACK_VIDEO_NAME,
+        path:match("(%.%w+)$") or FALLBACK_EXTENSION
 end
 
 function handle_extract()
@@ -312,28 +530,42 @@ function handle_extract()
     
     local tp = state.timepoints[next(selection)]
     local v_path, v_dir, v_name = get_export_context()
-    local slash = package.config:sub(1,1)
+    if not v_path then update_status("No input.") return end
+
     local root = v_dir .. v_name .. DIR_SUFFIX_FRAMES
-    local sub = root .. slash .. sanitize_filename(tp.label)
+    local sub  = path_join(root, sanitize_filename(tp.label))
     vlc.io.mkdir(root, "0700"); vlc.io.mkdir(sub, "0700")
 
     local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
     local dur = bef + (tonumber(state.ui.widgets.ext_after:get_text()) or 0)
     local start = math.max(0, (tp.time / TIME_BASE) - bef)
-    
+
+    local in_path = get_input_path_for_ffmpeg() or v_path
+    local out_pattern = path_join(sub, "frame_%04d.png")
+    local out_single  = path_join(sub, "frame_0001.png")
+
     local cmd
     if dur > 0 then
-        cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" "%s/frame_%%04d.png"',
-            start, dur, v_path, tonumber(state.ui.widgets.ext_fps:get_text()) or 1,
+        cmd = string.format(
+            'ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" "%s"',
+            start, dur, in_path,
+            tonumber(state.ui.widgets.ext_fps:get_text()) or 1,
             tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
-            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub)
+            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT,
+            out_pattern
+        )
     else
-        cmd = string.format('ffmpeg -y -ss %.3f -i "%s" -frames:v 1 -vf "scale=%d:%d" "%s/frame_0001.png"',
-            start, v_path, tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
-            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT, sub)
+        cmd = string.format(
+            'ffmpeg -y -ss %.3f -i "%s" -frames:v 1 -vf "scale=%d:%d" "%s"',
+            start, in_path,
+            tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH,
+            tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT,
+            out_single
+        )
     end
-    update_status("Extracting frames...")
-    os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
+
+    update_status("Extracting frames... (see ffmpeg_last.log / ffmpeg_run.cmd in userdatadir)")
+    run_ffmpeg_async(cmd)
 end
 
 function handle_extract_movie()
@@ -344,19 +576,28 @@ function handle_extract_movie()
     
     local tp = state.timepoints[next(selection)]
     local v_path, v_dir, v_name, v_ext = get_export_context()
-    local slash = package.config:sub(1,1)
+    if not v_path then update_status("No input.") return end
+
     local export_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
     vlc.io.mkdir(export_dir, "0700")
     
     local bef = tonumber(state.ui.widgets.ext_before:get_text()) or 0
     local dur = bef + (tonumber(state.ui.widgets.ext_after:get_text()) or 0)
-    local out_name = tp.label .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "") .. v_ext
-    
-    -- 無劣化コピー
-    local cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -c copy "%s/%s"',
-        math.max(0, (tp.time / TIME_BASE) - bef), dur, v_path, export_dir, out_name)
-    update_status("Extracting movie (Lossless)...")
-    os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
+
+    local out_name = tp.label
+        .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "")
+        .. v_ext
+
+    local in_path = get_input_path_for_ffmpeg() or v_path
+    local out_path = path_join(export_dir, out_name)
+
+    local cmd = string.format(
+        'ffmpeg -y -ss %.3f -t %.3f -i "%s" -c copy "%s"',
+        math.max(0, (tp.time / TIME_BASE) - bef), dur, in_path, out_path
+    )
+
+    update_status("Extracting movie (Lossless)... (see ffmpeg_last.log / ffmpeg_run.cmd in userdatadir)")
+    run_ffmpeg_async(cmd)
 end
 
 function handle_extract_movie_encode()
@@ -367,7 +608,8 @@ function handle_extract_movie_encode()
     
     local tp = state.timepoints[next(selection)]
     local v_path, v_dir, v_name, v_ext = get_export_context()
-    local slash = package.config:sub(1,1)
+    if not v_path then update_status("No input.") return end
+
     local export_dir = v_dir .. v_name .. DIR_SUFFIX_CUTS
     vlc.io.mkdir(export_dir, "0700")
     
@@ -376,15 +618,22 @@ function handle_extract_movie_encode()
     local fps = tonumber(state.ui.widgets.ext_fps:get_text()) or 30
     local w   = tonumber(state.ui.widgets.ext_w:get_text()) or DEFAULT_WIDTH
     local h   = tonumber(state.ui.widgets.ext_h:get_text()) or DEFAULT_HEIGHT
-    
-    local out_name = tp.label .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "") .. "_encoded" .. v_ext
-    
-    -- 再エンコード
-    local cmd = string.format('ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" -c:v libx264 -preset ultrafast -crf 23 -c:a aac "%s/%s"',
-        math.max(0, (tp.time / TIME_BASE) - bef), dur, v_path, fps, w, h, export_dir, out_name)
-    
-    update_status("Extracting movie (Encoding)...")
-    os.execute((slash == "\\") and ('start /b ' .. cmd) or (cmd .. ' &'))
+
+    local out_name = tp.label
+        .. (tp.remark ~= "" and (MOVIE_FILENAME_SEPARATOR .. sanitize_filename(tp.remark)) or "")
+        .. "_encoded"
+        .. v_ext
+
+    local in_path = get_input_path_for_ffmpeg() or v_path
+    local out_path = path_join(export_dir, out_name)
+
+    local cmd = string.format(
+        'ffmpeg -y -ss %.3f -t %.3f -i "%s" -vf "fps=%d,scale=%d:%d" -c:v libx264 -preset ultrafast -crf 23 -c:a aac "%s"',
+        math.max(0, (tp.time / TIME_BASE) - bef), dur, in_path, fps, w, h, out_path
+    )
+
+    update_status("Extracting movie (Encoding)... (see ffmpeg_last.log / ffmpeg_run.cmd in userdatadir)")
+    run_ffmpeg_async(cmd)
 end
 
 function input_changed() sync_with_input() end
