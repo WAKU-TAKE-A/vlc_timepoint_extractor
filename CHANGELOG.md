@@ -1,3 +1,20 @@
+## [0.9.8] - 2026-01-28
+
+### Added
+- userdatadir へのフォールバック機能（.tp / FFmpeg ログ・コマンド保存）。
+- FFmpeg 実行ラッパー（run_ffmpeg_async / save_last_ffmpeg_command）と Windows 用 .cmd 出力（UTF-8 BOM付）。
+- パス・ファイル操作ユーティリティ（get_slash, path_join, write_text_file 等）と djb2_hash。
+
+###Changed
+- .tp の保存/読み込みを優先→フォールバック方式に改め、非ASCII Windows パス時は強制フォールバック。
+- FFmpeg 実行を直接 os.execute から run_ffmpeg_async に移行し、ログ保存や非同期実行を行うように。
+- ステータスメッセージやファイル名生成の挙動を整理。
+
+###Fixed
+- Windows の .cmd 内での % 解釈問題（frame_%04d 等）を回避するための % エスケープ。
+- 日本語/非ASCII パスでの mojibake や実行失敗への対処。
+- FFmpeg 存在チェックと .tp 読み書きの安定性向上。
+
 ## [0.9.7] - 2026-01-15
 ### Added
 - **Extract Movie (Encode) ボタンの追加**: Resolution (WxH) および FPS 設定を反映して動画を切り出す機能を追加。
