@@ -1,65 +1,85 @@
 # VLC TimePoint Extractor
 
-A VLC media player extension designed to manage video timepoints and automate frame sequence or clip extraction using FFmpeg.
+VLC メディアプレイヤー用の拡張機能です。動画のタイムポイントを管理し、FFmpeg を使ったフレーム連番の書き出しやクリップ切り出しを自動化します。
 
-This tool is particularly useful for technical engineers, researchers, and developers working on **computer vision datasets**, **visual inspection analysis**, or **video editing workflows**.
+コンピュータビジョン向けデータセット作成、外観検査分析、動画編集ワークフローなど、技術者・研究者・開発者の用途を主に想定しています。
 
-## Features
+---
 
-- **TimePoint Management**: Save specific timestamps with a structured naming convention (`Point0001`, `Point0002`, etc.).
-- **Metadata Storage**: Automatically saves/loads data to a `.tp` file (Lua table format) in the same directory as the video file.
-  - **Windows Unicode Path Fallback**: If the video path contains non-ASCII characters (e.g., Japanese) and saving next to the video fails, the `.tp` file is stored in VLC's user data directory under `timepoint_extractor/`.
-- **Frame Extraction**: Export frame sequences with configurable FPS, resolution (width/height), and "before/after" temporal buffers.
-- **Lossless Movie Cutting**: Instantly extract video segments using FFmpeg's stream copy (`-c copy`) without re-encoding.
-- **Re-encode Export**: Encode video segments to apply specific resolution and FPS settings.
-- **Remark Support**: Add custom notes/remarks to each timepoint for better data organization.
-- **Safety & Stability**: Includes FFmpeg path verification and protected data loading (`pcall`) to prevent crashes.
-- **Auto-Sorting**: Timepoints are always maintained in chronological order.
-- **Windows Unicode Extraction Support**: On Windows, extraction is executed via a generated UTF-8 `.cmd` wrapper to improve compatibility with non-ASCII (e.g., Japanese) paths.
+## 機能
 
-## Requirements
+- **タイムポイント管理**: 任意の再生位置を `Point0001`, `Point0002` … の連番で保存します。
+- **メタデータの保存**: タイムポイントのデータは動画ファイルと同じディレクトリに `.tp` ファイルとして自動保存・自動ロードされます。
+  - **Windows Unicode パスのフォールバック**: 動画のパスに非ASCII文字（日本語など）が含まれる場合、`.tp` ファイルは VLC のユーザーデータディレクトリ内 `timepoint_extractor/` に保存されます。
+- **フレーム抽出**: FPS・解像度（幅×高さ）・前後バッファ秒数を指定してフレーム連番を書き出せます。
+- **ロスレス動画切り出し**: FFmpeg のストリームコピー（`-c copy`）を使い、再エンコードなしで動画セグメントを瞬時に切り出します。
+- **再エンコード書き出し**: 解像度や FPS を変更しながらセグメントを書き出します。
+- **リマーク（メモ）**: 各タイムポイントに任意のメモを付けてデータ整理に役立てられます。
+- **自動ソート**: タイムポイントは常に時系列順に整列されます。
+- **Unicode パス対応**: 非ASCII文字（日本語など）を含むパスへの対応として、UTF-8 の `.cmd` ラッパーを経由して FFmpeg を実行します。
 
-1. **VLC Media Player**: Tested on version 3.x.
-2. **FFmpeg**: Must be installed and added to your system's **PATH** environment variable.
+---
 
-## Installation
+## 必要環境
 
-1. Download the `timepoint_extractor.lua` script.
-2. Move the script to the VLC extensions directory:
-   - **Windows**: `C:\Program Files\VideoLAN\VLC\lua\extensions`
-   - **Linux**: `~/.local/share/vlc/lua/extensions/`
-3. Restart VLC.
-4. Open the extension from the menu: `View` -> `VLC TimePoint Extractor`.
+1. **VLC Media Player**: バージョン 3.x で動作確認済み。
+2. **FFmpeg**: インストール済みで、システムの **PATH** に登録されていること。
 
-## Usage
+---
 
-### 1. Managing Points
-- **Add TimePoint**: Captures the current video time and adds it to the list.
-- **Update Remark**: Enter text in the Remark field and click this to update an existing point.
-- **Jump To**: Select a point in the list to seek the video to that specific time. The remark will automatically populate the input field.
-- **Remove**: Deletes the selected point and automatically re-labels remaining points to maintain the sequence.
+## インストール
 
-### 2. Extraction
-- **Extract Frames**: 
-  - Creates a folder named `{video_name}_extracted_frames`.
-  - Sub-folders are created for each point (e.g., `Point0001`).
-  - Exports images as `.png` based on your FPS and resolution settings.
-- **Extract Movie (Lossless)**: 
-  - Creates a folder named `{video_name}_extracted_movies`.
-  - Clips the video segment based on "Before" and "After" seconds using lossless stream copying.
-  - Filename format: `PointXXXX_Remark.ext`.
-- **Extract Movie (Encode)**:
-  - Creates a folder named `{video_name}_extracted_movies`.
-  - Re-encodes the segment to apply your resolution and FPS settings.
-  - Filename format: `PointXXXX_Remark_encoded.ext`.
+1. `vlc_timepoint_extractor.lua` をダウンロードします。
+2. VLC の拡張機能ディレクトリにファイルを移動します: `C:\Program Files\VideoLAN\VLC\lua\extensions\`
+3. VLC を再起動します。
+4. メニューから拡張機能を開きます: `ツール` → `拡張機能` → `VLC TimePoint Extractor`
 
-#### Notes (Windows extraction / logs)
-On Windows, each extraction generates the following files under VLC user data directory `timepoint_extractor/`:
-- `ffmpeg_last_command.txt` (last FFmpeg command; useful for copy/paste testing)
-- `ffmpeg_run.cmd` (generated wrapper used to run FFmpeg; UTF-8 BOM + `chcp 65001`)
-- `ffmpeg_last.log` (FFmpeg stdout/stderr output)
+---
 
-These files use **fixed names** and are **overwritten** each time you run an extraction.
+## 使い方
 
-## License
+### 1. タイムポイントの管理
+
+| 操作 | 説明 |
+|------|------|
+| **Add TimePoint** | 現在の再生位置をタイムポイントとしてリストに追加します。 |
+| **Update Remark** | リマーク欄に入力したテキストで選択中のポイントのメモを更新します。 |
+| **Jump To** | 選択したポイントの時刻に動画をシークします。そのポイントのリマークがリマーク欄に自動入力されます。 |
+| **Remove** | 選択したポイントを削除します。残りのポイントは自動的に連番が振り直されます。 |
+
+### 2. 抽出
+
+#### Extract Frames（フレーム抽出）
+- `{動画名}_extracted_frames` フォルダが作成されます。
+- 各ポイントごとにサブフォルダ（例: `Point0001`）が作成されます。
+- FPS・解像度の設定に基づいて `.png` 画像が書き出されます。
+
+#### Extract Movie (Lossless)（ロスレス動画切り出し）
+- `{動画名}_extracted_movies` フォルダが作成されます。
+- 「Before」「After」で指定した秒数の範囲を、再エンコードなしで切り出します。
+- ファイル名の形式: `PointXXXX_リマーク.ext`
+
+#### Extract Movie (Encode)（再エンコード書き出し）
+- `{動画名}_extracted_movies` フォルダが作成されます。
+- 解像度・FPS の設定を適用しながらセグメントを再エンコードします。
+- ファイル名の形式: `PointXXXX_リマーク_encoded.ext`
+
+---
+
+## ログファイル
+
+抽出を実行するたびに以下のファイルが VLC ユーザーデータディレクトリの `timepoint_extractor/` フォルダに生成されます。
+
+| ファイル名 | 内容 |
+|-----------|------|
+| `ffmpeg_last_command.txt` | 最後に実行した FFmpeg コマンド（手動テスト用にコピーして利用可能） |
+| `ffmpeg_run.cmd` | FFmpeg 実行用の生成ラッパー（UTF-8 BOM + `chcp 65001`） |
+| `ffmpeg_last.log` | FFmpeg の標準出力・標準エラー出力 |
+
+> **注意**: これらのファイルは固定名で、抽出を実行するたびに上書きされます。
+
+---
+
+## ライセンス
+
 MIT License
